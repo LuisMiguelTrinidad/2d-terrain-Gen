@@ -1,59 +1,88 @@
-import threading
-import os
+import random
+import math
 import numpy as np
 
-class YourClass:
-    SEEDTEMP = 423234
-    SEEDALTU = 6782342390
-    SEEDHUME = 54342321
-    CHUNK_SIZE = 128
+def poisson_disc_sampling(width, height, radius, k):
+    GRID_SIZE = radius / math.sqrt(2)
+    cols, rows = int(width / GRID_SIZE) + 1, int(height / GRID_SIZE) + 1
 
-    def getNoise(self, seed, x, y, scale, size):
-        return np.random.rand(size, size)
+    def initialize_grid():
+        return np.full((cols, rows), None, dtype=object)
 
-    def getBioma(self, hume, altu, temp):
-        return int(hume + altu + temp)
+    def distance(p1, p2):
+        return np.hypot(p1[0] - p2[0], p1[1] - p2[1])
 
-    def getChunk(self, x, y):
-        if os.path.exists(f"./Chunks/T_{hex(self.SEEDTEMP).replace('0x','')}A_{hex(self.SEEDTEMP).replace('0x','')}H_{hex(self.SEEDTEMP).replace('0x','')}/{x}/{y}.npy"):
-            return np.load(f"./Chunks/T_{hex(self.SEEDTEMP).replace('0x','')}A_{hex(self.SEEDTEMP).replace('0x','')}H_{hex(self.SEEDTEMP).replace('0x','')}/{x}/{y}.npy")
-        else:
-            temp = self.getNoise(self.SEEDTEMP, x, y, 3, 128)
-            altu = self.getNoise(self.SEEDALTU, x, y, 6, 256)
-            hume = self.getNoise(self.SEEDHUME, x, y, 3, 256)
-            array_biomas = np.zeros(dtype=np.uint8, shape=(self.CHUNK_SIZE, self.CHUNK_SIZE))
-            for i in range(self.CHUNK_SIZE):
-                for j in range(self.CHUNK_SIZE):
-                    array_biomas[i, j] = self.getBioma(hume[i, j], altu[i, j], temp[i, j])
-            os.makedirs(f"./Chunks/T_{hex(self.SEEDTEMP).replace('0x','')}A_{hex(self.SEEDTEMP).replace('0x','')}H_{hex(self.SEEDTEMP).replace('0x','')}/{x}", exist_ok=True)
-            np.save(f"./Chunks/T_{hex(self.SEEDTEMP).replace('0x','')}A_{hex(self.SEEDTEMP).replace('0x','')}H_{hex(self.SEEDTEMP).replace('0x','')}/{x}/{y}", array_biomas)
-            return array_biomas
+    def generate_point_around(point):
+        r = radius * (random.random() + 1)
+        angle = 2 * math.pi * random.random()
+        new_x = point[0] + r * math.cos(angle)
+        new_y = point[1] + r * math.sin(angle)
+        return new_x, new_y
 
-    def getChunkThreaded(self, x, y, results, index):
-        def target():
-            results[index] = self.getChunk(x, y)
-        thread = threading.Thread(target=target)
-        thread.start()
-        return thread
+    def in_bounds(point):
+        return 0 <= point[0] < width and 0 <= point[1] < height
 
-# Ejemplo de uso
-obj = YourClass()
-threads = []
-results = [None] * 9  # Lista para almacenar los resultados de los chunks
+    def fits(point):
+        col = int(point[0] / GRID_SIZE)
+        row = int(point[1] / GRID_SIZE)
+        for i in range(max(col - 2, 0), min(col + 3, cols)):
+            for j in range(max(row - 2, 0), min(row + 3, rows)):
+                neighbor = grid[i, j]
+                if neighbor is not None and distance(point, neighbor) < radius:
+                    return False
+        return True
 
-# Generar 9 chunks en una cuadrícula 3x3
-index = 0
-for x in range(3):
-    for y in range(3):
-        thread = obj.getChunkThreaded(x, y, results, index)
-        threads.append(thread)
-        index += 1
+    def restart_simulation(start_point):
+        nonlocal grid, active, points
+        grid = initialize_grid()
+        points = [start_point]
+        active = [start_point]
+        col = int(start_point[0] / GRID_SIZE)
+        row = int(start_point[1] / GRID_SIZE)
+        grid[col, row] = start_point
 
-# Esperar a que todos los hilos terminen
-for thread in threads:
-    thread.join()
+    # Create a grid to store points
+    grid = initialize_grid()
 
-# Imprimir los chunks generados
-for i, chunk in enumerate(results):
-    print(f"Chunk {i}:")
-    print(chunk)
+    # List to store active points
+    active = []
+    points = []
+
+    # Initialize with a random point
+    initial_point = (random.uniform(0, width), random.uniform(0, height))
+    restart_simulation(initial_point)
+
+    # Main loop
+    while active:
+        rand_index = random.randint(0, len(active) - 1)
+        point = active[rand_index]
+        found = False
+
+        for _ in range(k):
+            new_point = generate_point_around(point)
+            if in_bounds(new_point) and fits(new_point):
+                points.append(new_point)
+                active.append(new_point)
+                col = int(new_point[0] / GRID_SIZE)
+                row = int(new_point[1] / GRID_SIZE)
+                grid[col][row] = new_point
+                found = True
+                break
+
+        if not found:
+            active.pop(rand_index)
+            # Create a 2D numpy array representation
+    matrix = np.zeros((height, width), dtype=int)
+    for p in points:
+        x, y = int(p[0]), int(p[1])
+        matrix[y, x] = 1
+
+    return matrix
+def visualize_matrix(matrix):
+    import matplotlib.pyplot as plt
+    plt.imshow(matrix, cmap='Greys', interpolation='none')
+    plt.show()
+# Example usage
+a = poisson_disc_sampling(128, 128, 2, 10)
+visualize_matrix(a)
+[print(a[r]) for r in range(a.shape[0])]
